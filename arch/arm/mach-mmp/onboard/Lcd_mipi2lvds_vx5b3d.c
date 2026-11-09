@@ -279,8 +279,15 @@ int vx5b3d_power(struct pxa168fb_info *fbi, int on)
 		vx5b3d->vx5b3d_enable = false;
 
 		vx5b3d_backlightReg_on(false);
-		lcd_power(fbi, 0);		
-#if defined(CONFIG_QUICKLOGIC_BRIDGE)
+		lcd_power(fbi, 0);
+/* GOYA shares I2C1 with the live BT532 touchscreen. Android 13 blanks
+ * fb0 without the old early-suspend touch power sequence. Remuxing
+ * this bus to GPIO leaves touch timing out and prevents bridge wake.
+ * Keep I2C pins active for that configuration; true touch/system PM
+ * still owns its existing pin changes in board-goya-input.c.
+ */
+#if defined(CONFIG_QUICKLOGIC_BRIDGE) && \
+	(!defined(CONFIG_MACH_GOYA) || defined(CONFIG_HAS_EARLYSUSPEND))
 #if defined(CONFIG_SPA) || defined(CONFIG_SPA_LPM_MODE)
 		if(!spa_lpm_charging_mode_get())
 #else
