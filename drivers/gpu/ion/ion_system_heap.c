@@ -290,22 +290,40 @@ int ion_system_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
 {
 	struct sg_table *table = buffer->priv_virt;
 	unsigned long addr = vma->vm_start;
-	unsigned long offset = vma->vm_pgoff;
+	unsigned long offset;
 	struct scatterlist *sg;
-	int i;
+	int i, ret;
+
+	/* vm_pgoff counts pages, while an SG entry can span many pages. */
+	if (vma->vm_end <= addr ||
+	    vma->vm_pgoff > (buffer->size >> PAGE_SHIFT))
+		return -EINVAL;
+	offset = vma->vm_pgoff << PAGE_SHIFT;
+	if (vma->vm_end - addr > buffer->size - offset)
+		return -EINVAL;
 
 	for_each_sg(table->sgl, sg, table->nents, i) {
-		if (offset) {
-			offset--;
+		struct page *page = sg_page(sg);
+		unsigned long len = sg_dma_len(sg);
+
+		if (offset >= len) {
+			offset -= len;
 			continue;
 		}
-		remap_pfn_range(vma, addr, page_to_pfn(sg_page(sg)),
-				sg_dma_len(sg), vma->vm_page_prot);
-		addr += sg_dma_len(sg);
-		if (addr >= vma->vm_end)
+		page += offset >> PAGE_SHIFT;
+		len -= offset;
+		offset = 0;
+		/* Never map beyond this VMA, even for a high-order SG entry. */
+		len = min(len, vma->vm_end - addr);
+		ret = remap_pfn_range(vma, addr, page_to_pfn(page), len,
+				      vma->vm_page_prot);
+		if (ret)
+			return ret;
+		addr += len;
+		if (addr == vma->vm_end)
 			return 0;
 	}
-	return 0;
+	return -EINVAL;
 }
 
 static struct ion_heap_ops system_heap_ops = {
